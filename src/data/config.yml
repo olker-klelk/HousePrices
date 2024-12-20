@@ -1,0 +1,19 @@
+data_paths:
+  data_dir: "../../data"
+  raw_train_data: "raw/train.csv"
+  processed_data: "processed/train.csv"
+
+data_processing:
+  test_size: 0.2
+  random_state: 42
+  target_column: "SalePrice"
+
+feature_engineering:
+  numerical_features:
+  categorical_features:
+
+model_params:
+  random_forest:
+    n_estimators: 100
+    max_depth: 10
+    min_samples_split: 2
