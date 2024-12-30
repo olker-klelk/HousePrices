@@ -1,4 +1,4 @@
 data/raw/
 data/processed/
-data_description.txt
-house-prices-advanced-regression-techniques.zip
+src/models/
+*.zip
