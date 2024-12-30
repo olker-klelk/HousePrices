@@ -5,7 +5,11 @@ import yaml
 from typing import Tuple, Optional, Dict
 from pathlib import Path
 from sklearn.model_selection import train_test_split
+from sklearn.feature_selection import mutual_info_regression
 from preprocess import DataPreprocessor
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 
 logging.basicConfig(
         level=logging.INFO,
@@ -80,9 +84,9 @@ class DataLoader:
         logger.info("Data quality check completed")
         return quality_report
     def split_data(self, 
-                                     target_column: str,
-                                     test_size: float = 0.2,
-                                     random_state: int = 42) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                       target_column: str,
+                       test_size: float = 0.2,
+                       random_state: int = 42) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         分割訓練集和測試集
         
@@ -94,6 +98,7 @@ class DataLoader:
         Returns:
                 訓練集和測試集的元組
         """
+        
         if self.data is None:
             self.load_raw_data()
                 
@@ -147,23 +152,67 @@ class DataLoader:
         Returns:
                 特徵信息字典
         """
-        if self.data is None:
-            self.load_raw_data()
+        if self.train_data is None:
+            raise ValueError("pls load data,split data, process data get train data")
                 
         feature_info = {
-            'numerical_features': list(self.data.select_dtypes(include=['int64', 'float64']).columns),
-            'categorical_features': list(self.data.select_dtypes(include=['object']).columns),
+            'numerical_features': list(self.train_data.select_dtypes(include=['int64', 'float64']).columns),
+            'categorical_features': list(self.train_data.select_dtypes(include=['object']).columns),
             'feature_descriptions': {
                 column: {
-                    'dtype': str(self.data[column].dtype),
-                    'unique_values': len(self.data[column].unique()),
-                    'missing_values': self.data[column].isnull().sum()
+                    'dtype': str(self.train_data[column].dtype),
+                    'unique_values': len(self.train_data[column].unique()),
+                    'missing_values': self.train_data[column].isnull().sum()
                 }
-                for column in self.data.columns
+                for column in self.train_data.columns
             }
         }
         
         return feature_info
+
+    def analyze_features(self, target_column: str):
+        """執行完整的特徵分析"""
+        # 1. 計算數值特徵與目標變量的相關性
+        self.plot_correlation_heatmap()
+        
+        # # 2. 分析特徵重要性
+        self.plot_feature_importance(target_column)
+        
+        # # 3. 顯示數值特徵的分布
+        # self.plot_numeric_features_distribution()
+        
+        # # 4. 異常值檢測
+        # self.plot_boxplots()
+        
+        plt.show()
+    
+    def plot_correlation_heatmap(self, select_threshold = 0.5, set_method = 'pearson'):
+        """繪製相關性熱圖"""
+        numeric_data = self.train_data.select_dtypes(include=['float64', 'int64'])
+        corr = numeric_data.corr(method = set_method) # math pearson, spearman, kendall
+        print("         SalePrice\n", corr[corr.SalePrice > select_threshold].SalePrice)
+        plt.figure(figsize=(12, 8))
+        sns.heatmap(corr, cmap='coolwarm', center=0, annot=False)
+        plt.title('Feature Correlation Heatmap')
+        plt.tight_layout()
+
+    def plot_feature_importance(self, target_column:str):
+        """計算並繪製特徵重要性"""
+        numeric_features = self.train_data.select_dtypes(include=['float64', 'int64']).drop(columns = [target_column])
+        print(numeric_features)
+        target = self.train_data[target_column]
+        # 計算互信息
+        mi_scores = mutual_info_regression(numeric_features, target)
+        mi_scores = pd.Series(mi_scores, index=numeric_features.columns)
+        mi_scores = mi_scores.sort_values(ascending=False)
+        
+        plt.figure(figsize=(10, 6))
+        mi_scores.head(15).plot(kind='bar')
+        plt.title('Feature Importance (Based on Mutual Information)')
+        plt.xlabel('Feature')
+        plt.ylabel('Mutual Information Score')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
 
 if __name__ == "__main__":
 
@@ -176,20 +225,33 @@ if __name__ == "__main__":
     loader.load_raw_data()
     # 檢查數據質量
     quality_report = loader.check_data_quality()
-    # print("Data Quality Report:")
-    # for report in quality_report:
-    #     print(report, quality_report[report], "\n");
+    print("Data Quality Report:")
+    for report in quality_report:
+        print(report, quality_report[report], "\n");
 
     train_data, test_data = loader.split_data(target_column='SalePrice')
-
+    
     preprocessor = DataPreprocessor('config.yml')
-    loader.train_data = preprocessor.handle_missing_values(train_data)
-    loader.train_data = preprocessor.handle_outliers(loader.train_data)
-    loader.train_data = preprocessor.scale_numerical_features(loader.train_data, True)
-    loader.train_data = preprocessor.encode_categorical_features(loader.train_data, fit=True)
+    loader.train_data = preprocessor.preprocess_train_data_1(loader.train_data, True)
+    loader.analyze_features(target_column="SalePrice")
+    loader.train_data = preprocessor.preprocess_train_data_2(loader.train_data, True)
+
     #print(train_data);
     loader.save_processed_data()
     feature_info = loader.get_feature_info()
-    #print("Feature Information:")
-    #for report in feature_info:
-    #    print(report, feature_info[report], "\n");
+    print("Feature Information:")
+    for category, items in feature_info.items():
+        print(category, "\n")
+        if isinstance(items, list):
+            for i in range(0, len(items), 3):
+                print(", ".join(items[i:i+3]))
+        elif isinstance(items, dict):
+            # 處理嵌套字典
+            for i, (key, value) in enumerate(items.items(), 1):
+                print(f"{key}: {value}", end="  ")
+                if i % 2 == 0:
+                    print()  # 換行
+            if len(items) % 2 != 0:  # 確保最後一行後有換行
+                print()
+    SalePrice = preprocessor.inverse_scale_numerical_features(loader.train_data["SalePrice"])
+    print(SalePrice)

@@ -85,8 +85,8 @@ class DataPreprocessor:
         return df
     
     def scale_numerical_features(self, 
-                               data: pd.DataFrame,
-                               fit: bool = True) -> pd.DataFrame:
+                                     data: pd.DataFrame,
+                                     fit: bool = True) -> pd.DataFrame:
         """
         標準化數值特徵
         
@@ -99,7 +99,7 @@ class DataPreprocessor:
         """
         df = data.copy()
         
-        for feature in list(df.select_dtypes(include=['int64', 'float64']).columns):
+        for feature in list(df.select_dtypes(include=['int64', 'float64']).columns):# list 
             if fit and feature not in self.scalers:
                 self.scalers[feature] = StandardScaler()
                 df[feature] = self.scalers[feature].fit_transform(
@@ -112,11 +112,55 @@ class DataPreprocessor:
 
         logger.info("Numerical features scaled")
         return df
+    def inverse_scale_numerical_features(self, data: Union[pd.DataFrame, pd.Series]) -> Union[pd.DataFrame, pd.Series]:
+        """還原標準化的數值"""
+        is_series = isinstance(data, pd.Series)
     
+        # 如果是 Series，轉換為 DataFrame
+        if is_series:
+            feature_name = data.name
+            df = pd.DataFrame({feature_name: data})
+        else:
+            df = data.copy()
+        
+        for feature in list(df.select_dtypes(include=['int64', 'float64']).columns):
+            try:
+                if feature in self.scalers:
+                    df[feature] = self.scalers[feature].inverse_transform(df[[feature]])
+                else:
+                    logger.warning(f"No scaler found for feature {feature}")
+            except Exception as e:
+                logger.error(f"Error inverting scaling for feature {feature}: {str(e)}")
+                raise
+
+        return df
+
+    def save_scalers(self, path: str = 'process_model.joblib'):
+        """保存所有的scalers"""
+        process_model_dict = {
+            'scalers': self.scalers,
+            'imputers': self.imputers,
+            'label_encoders': self.label_encoders,
+            'one_hot_encoders': self.one_hot_encoders
+        }
+
+        # 保存scalers
+        joblib.dump(process_model_dict, path)
+        logger.info(f"Scalers saved to {path}")
+
+    def load_scalers(self, path: str = 'process_model.joblib'):
+        """加載保存的scalers"""
+        process_model_dict = joblib.load(path)
+        self.scalers = process_model_dict['scalers']
+        self.imputers = process_model_dict['imputers']
+        self.label_encoders = process_model_dict['label_encoders']
+        self.one_hot_encoders = process_model_dict['one_hot_encoders']
+        logger.info(f"Scalers loaded from {path}")
+
     def encode_categorical_features(self,
-                                  data: pd.DataFrame,
-                                  encoding_type: str = 'onehot',
-                                  fit: bool = True) -> pd.DataFrame:
+                                        data: pd.DataFrame,
+                                        encoding_type: str = 'onehot',
+                                        fit: bool = True) -> pd.DataFrame:
         """
         編碼類別特徵
         
@@ -183,9 +227,9 @@ class DataPreprocessor:
         return df
     
     def handle_outliers(self,
-                       data: pd.DataFrame,
-                       method: str = 'iqr',
-                       threshold: float = 1.5) -> pd.DataFrame:
+                            data: pd.DataFrame,
+                            method: str = 'iqr',
+                            threshold: float = 1.5) -> pd.DataFrame:
         """
         處理異常值
         
@@ -199,7 +243,13 @@ class DataPreprocessor:
         """
         df = data.copy()
         
-        for feature in list(df.select_dtypes(include=['int64', 'float64']).columns):
+        for feature in list(df.drop(columns=["SalePrice"]).select_dtypes(include=['int64', 'float64']).columns):
+            zero_ratio = (df[feature] == 0).mean()
+        
+            # 如果零值比例過高且選擇忽略
+            if zero_ratio > 0.5:
+                logger.warning(f"Skipping feature {feature} due to high zero ratio: {zero_ratio:.2%}")
+                continue
             if method == 'iqr':
                 Q1 = df[feature].quantile(0.25)
                 Q3 = df[feature].quantile(0.75)
@@ -232,47 +282,20 @@ class DataPreprocessor:
             
         Returns:
             添加新特徵後的數據框
+            刪除不需要的項目
+            以當前數據用算法新增新項目
         """
         df = data.copy()
         
-        # 這裡添加特徵工程的邏輯
-        # 例如：組合現有特徵、創建交互特徵等
         
         logger.info("New features created")
         return df
-    
-    def save_preprocessor(self, filepath: Union[str, Path]):
-        """保存預處理器的狀態"""
-        preprocessor_state = {
-            'scalers': self.scalers,
-            'label_encoders': self.label_encoders,
-            'one_hot_encoders': self.one_hot_encoders,
-            'imputers': self.imputers,
-            'numerical_features': self.numerical_features,
-            'categorical_features': self.categorical_features
-        }
-        
-        joblib.dump(preprocessor_state, filepath)
-        logger.info(f"Preprocessor saved to {filepath}")
-    
-    def load_preprocessor(self, filepath: Union[str, Path]):
-        """加載預處理器的狀態"""
-        preprocessor_state = joblib.load(filepath)
-        
-        self.scalers = preprocessor_state['scalers']
-        self.label_encoders = preprocessor_state['label_encoders']
-        self.one_hot_encoders = preprocessor_state['one_hot_encoders']
-        self.imputers = preprocessor_state['imputers']
-        self.numerical_features = preprocessor_state['numerical_features']
-        self.categorical_features = preprocessor_state['categorical_features']
-        
-        logger.info(f"Preprocessor loaded from {filepath}")
-    
-    def preprocess_data(self,
-                       data: pd.DataFrame,
-                       fit: bool = True) -> pd.DataFrame:
+
+    def preprocess_train_data_1(self,
+                                  data: pd.DataFrame,
+                                  fit: bool = True) -> pd.DataFrame:
         """
-        執行完整的預處理流程
+        執行上半部分的預處理流程
         
         Args:
             data: 輸入數據框
@@ -289,48 +312,33 @@ class DataPreprocessor:
         # 2. 處理異常值
         df = self.handle_outliers(df)
         
+        logger.info("half preprocessing pipeline completed")
+        return df
+
+    def preprocess_train_data_2(self,
+                                  data: pd.DataFrame,
+                                  fit: bool = True) -> pd.DataFrame:
+        """
+        執行下半部分的預處理流程
+        
+        Args:
+            data: 輸入數據框
+            fit: 是否需要擬合轉換器
+            
+        Returns:
+            預處理後的數據框
+        """
+        df = data.copy()
+        
         # 3. 特徵工程
         df = self.create_features(df)
-        
+
         # 4. 標準化數值特徵
         df = self.scale_numerical_features(df, fit)
-        
+
         # 5. 編碼類別特徵
         df = self.encode_categorical_features(df, fit=fit)
         
-        logger.info("Full preprocessing pipeline completed")
+        self.save_scalers()
+        logger.info("half preprocessing pipeline completed")
         return df
-
-# 使用示例
-if __name__ == "__main__":
-    # 配置文件示例 (config.yml):
-    """
-    paths:
-      model_dir: "models"
-      
-    features:
-      numerical_features:
-        - "age"
-        - "income"
-        - "credit_score"
-      categorical_features:
-        - "education"
-        - "occupation"
-        - "marital_status"
-      target_column: "loan_status"
-    """
-    
-
-    
-    # 初始化預處理器
-    #preprocessor = DataPreprocessor('config.yml')
-    
-    # 執行預處理
-    #processed_data = preprocessor.preprocess_data(data)
-    
-    # 保存預處理器
-    # preprocessor.save_preprocessor('models/preprocessor.joblib')
-    
-    # print("Processed data shape:", processed_data.shape)
-    # print("\nProcessed data head:")
-    # print(processed_data.head())
