@@ -7,10 +7,13 @@ from sklearn.impute import SimpleImputer
 import logging
 import yaml
 import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 # 設置日誌
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('Preprocessor')
@@ -244,6 +247,17 @@ class DataPreprocessor:
         df = data.copy()
         
         for feature in list(df.drop(columns=["SalePrice"]).select_dtypes(include=['int64', 'float64']).columns):
+            
+            value_counts = df[feature].value_counts()
+            unique_values = len(value_counts)
+            most_common_ratio = value_counts.iloc[0] / len(df)
+            
+            # 檢查是否為類別性質的數值特徵
+            if unique_values < 20 and most_common_ratio > 0.4:
+                logger.warning(f"Skipping feature {feature} as it appears to be categorical: "
+                             f"{unique_values} unique values, most common value ratio: {most_common_ratio:.2%}")
+                continue
+
             zero_ratio = (df[feature] == 0).mean()
         
             # 如果零值比例過高且選擇忽略
@@ -257,8 +271,29 @@ class DataPreprocessor:
                 lower_bound = Q1 - threshold * IQR
                 upper_bound = Q3 + threshold * IQR
                 # print("\n", feature , f"lower :{lower_bound} upper {upper_bound}")
-                # print("\n lower : ", len(df[feature][df[feature] < lower_bound]))
-                # print("\n upper : ", len(df[feature][df[feature] > upper_bound]))
+                # print("\n lower : ", len(df[df[feature] < lower_bound][feature]))
+                # print("\n upper : ", len(df[df[feature] > upper_bound][feature]))
+                if len(df[(df[feature] < lower_bound) | (df[feature] > upper_bound)][feature]):
+                    outliers = df[(df[feature] < lower_bound) | (df[feature] > upper_bound)][feature]
+                    normal = df[(df[feature] >= lower_bound) & (df[feature] <= upper_bound)][feature]
+                    
+                    # 3. 畫箱型圖
+                    plt.figure(figsize=(10, 6))
+                    
+                    # 左邊：原始箱型圖
+                    plt.subplot(121)
+                    sns.boxplot(y=df[feature])
+                    plt.title('raw data')
+                    
+                    # 右邊：散點圖顯示異常值
+                    plt.subplot(122)
+                    plt.scatter(range(len(normal)), normal, c='blue', label='normal')
+                    plt.scatter(range(len(normal), len(normal) + len(outliers)), 
+                               outliers, c='red', label='outliers')
+                    plt.title('outliers mark')
+                    plt.legend()
+                    
+                    plt.tight_layout()
                 df[feature] = df[feature].clip(lower_bound, upper_bound)
                 
             elif method == 'zscore':

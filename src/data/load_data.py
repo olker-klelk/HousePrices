@@ -200,6 +200,7 @@ class DataLoader:
         """計算並繪製特徵重要性"""
         numeric_features = self.train_data.select_dtypes(include=['float64', 'int64']).drop(columns = [target_column])
         print(numeric_features)
+
         target = self.train_data[target_column]
         # 計算互信息
         mi_scores = mutual_info_regression(numeric_features, target)
